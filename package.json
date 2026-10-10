@@ -1,26 +1,25 @@
 {
-  "name": "hacktoberfest",
+  "name": "touchgrass",
   "version": "0.1.0",
   "private": true,
+  "description": "Get told to go outside at the one moment it costs you nothing. Runs an open-weight model locally, with no network call.",
+  "bin": {
+    "grass": "./bin/grass.js"
+  },
+  "main": "bin/grass.js",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "grass": "node bin/grass.js",
+    "test": "node test/run.js"
   },
-  "dependencies": {
-    "next": "16.4.0",
-    "react": "19.3.0",
-    "react-dom": "19.3.0"
-  },
-  "devDependencies": {
-    "@tailwindcss/turbopack": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.4.0",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+  "keywords": [
+    "hacktoberfest",
+    "gemma",
+    "llama.cpp",
+    "local-inference",
+    "offline"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
   }
 }

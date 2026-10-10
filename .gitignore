@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# model weights. 769 MB of GGUF has no business in git history.
+*.gguf
+/models/

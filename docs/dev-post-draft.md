@@ -50,7 +50,7 @@ It is a local offline CLI, so there is no hosted link to click. The repository b
 
 ## Code
 
-{% embed TODO(real): https://github.com/<you>/touchgrass %}
+{% embed https://github.com/Sketchify-Dev/seam-walk %}
 
 ## How I Built It
 

@@ -7,6 +7,10 @@
     "grass": "./bin/grass.js"
   },
   "main": "bin/grass.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sketchify-Dev/seam-walk.git"
+  },
   "scripts": {
     "grass": "node bin/grass.js",
     "test": "node test/run.js"

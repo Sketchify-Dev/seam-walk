@@ -1,5 +1,7 @@
 # touchgrass
 
+![Node 20+](https://img.shields.io/badge/node-%3E%3D20-brightgreen) ![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Network: none](https://img.shields.io/badge/network-none-lightgrey) ![Dependencies: zero](https://img.shields.io/badge/dependencies-zero-brightgreen)
+
 **Get told to go outside at the one moment it costs you nothing.** touchgrass runs an open-weight model on your own machine, makes no network call, and costs nothing per run.
 
 You are always mid-build. Stepping outside loses the thread, so the next thing on screen always wins, and the walk never happens. touchgrass watches your own work for a pause where stepping away costs nothing, then says one specific thing to go and do:
@@ -55,9 +57,13 @@ Colour disables itself automatically when `NO_COLOR` is set, when `--no-color` i
 
 ## Install
 
-Requires Node 20 or newer. No sudo, nothing installed system wide. Two downloads.
+Requires Node 20 or newer. No sudo, nothing installed system wide. Clone, then two downloads.
 
 ```bash
+# 0. the code
+git clone https://github.com/Sketchify-Dev/seam-walk.git
+cd seam-walk
+
 # 1. the weights (about 769 MB, ungated, no token needed)
 mkdir -p ~/.touchgrass/models
 curl -L -o ~/.touchgrass/models/gemma3-1b-q4.gguf \
@@ -100,7 +106,7 @@ Leave `grass watch` running in a visible pane. It prints nothing until your work
 
 ## The log is the point
 
-An outing is inferred from a gap in your file activity, then confirmed by one keypress when you get back. Suggestions that got ignored are logged too, with `confirmed: false`, because a log that only records successes is not evidence of anything. The footer reports how many suggestions the model actually wrote versus how many fell back, computed from the log rather than asserted.
+An outing is inferred from a gap in your file activity, then confirmed by one keypress when you get back. Suggestions that got ignored are logged too, with `confirmed: false`, because a log that only records successes is not evidence of anything. The footer reports how many suggestions the model actually wrote versus how many fell back, computed from the log rather than asserted. The table below shows the shape of it with example rows; real captures live in the DEV write-up.
 
 ```
 $ grass log
@@ -129,7 +135,8 @@ Numbers from real runs on the i5-7300U above, recorded in `docs/spec-touchgrass.
 | Prompt eval | 2.58 tok/s |
 | Generation | 4.53 tok/s |
 | Suggestion latency, warm cache | 3 to 10 s |
-| Peak resident memory during a suggestion | about 930 MB (ceiling 1800 MB) |
+| Rerun 2026-10-12 (`grass try`) | 1 model sentence in 16.6 s, then 2 fallback timeouts at 37.4 s and 92.8 s |
+| Peak resident memory during a suggestion | about 930 MB (ceiling 1800 MB); rerun peaked at 941 MB |
 
 The load cost is paid once, by a local `llama-server` the tool starts and keeps warm, so every suggestion after the first reuses the loaded weights and the cached prompt prefix. See `src/model.js` for why the prompt is cut to the bone.
 
@@ -144,14 +151,33 @@ grass try        # the fastest proof: 3 suggestions and the AC-5/AC-11 numbers
 grass watch      # make a commit in a watched repo and watch a suggestion appear
 ```
 
-`grass try` is the quickest thing to capture, because it runs the model end to end against a throwaway place without waiting for a real seam, and it prints the word-limit and memory numbers beside each sentence. It writes nothing to the log, so the evidence table stays only real outings.
+`grass try` is the quickest thing to capture, because it runs the model end to end against a throwaway place without waiting for a real seam, and it prints the word-limit and memory numbers beside each sentence. It writes nothing to the log, so the evidence table stays only real outings. Real output from 2026-10-12 on the i5-7300U above (2 of 3 fell back; reported, not hidden):
+
+```
+[1] 16.6s · model · 11 words
+    Walk to the bench by the water tower, 15 minutes away.
+
+[2] 37.4s · fallback · 16 words
+    You have 15 minutes. Walk to the bench by the water tower and come straight back.
+    reason: timeout
+
+[3] 92.8s · fallback · 16 words
+    You have 15 minutes. Walk to the bench by the water tower and come straight back.
+    reason: timeout
+
+  measured
+AC-5          pass  word limit and place named
+AC-11         pass  peak llama-server RSS 941 MB, ceiling 1800 MB
+
+Nothing was written to the log. This used a throwaway place.
+```
 
 Screenshots and a short screen recording are in the DEV write-up (`docs/dev-post-draft.md`). The log table and outdoor photographs there come from real use, not mock-ups.
 
 ## Tests
 
 ```bash
-npm test
+npm test   # currently 40/40 passing
 ```
 
 The solar tests assert physics rather than almanac values: day length at both solstices, equatorial day length across four dates, seasonal inversion in the southern hemisphere, polar night and midnight sun at Tromso, and the equation-of-time bound on solar noon. A radians slip, a sign error, or a wrong Julian epoch fails at least one of them. The model tests enforce the 20-word limit, the verbatim place name, and the number-accuracy rule, including the exact sentence that once slipped through.

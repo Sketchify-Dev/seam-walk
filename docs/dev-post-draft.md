@@ -91,10 +91,6 @@ This is the part the tool could not do any other way.
 
 The honest version: a frontier closed model would write a nicer sentence. But the whole value here is that a record of my working habits never leaves my laptop, and that the tool keeps working on hardware and in places where there is no connection to leave it over. Open weights are not the compromise in this project. They are the point of it.
 
-## My Agent Session
-
-TODO(real, optional): if you built any of this with an agent and want to show the process, save the session via DevRelay and embed it here with the `agent_session` tag, or delete this section.
-
 ## Prize Categories
 
 **Gemma** (Featured): the load-bearing model is Gemma 3 1B, chosen because at Q4 it is one of the few genuinely capable instruction-tuned models that fits and runs on a no-GPU 2017 laptop with room to spare.

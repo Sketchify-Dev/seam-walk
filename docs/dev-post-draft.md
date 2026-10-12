@@ -1,166 +1,105 @@
-# DEV post draft: touchgrass
-
-> Status: DRAFT. Every `[NEEDS REAL DATA]` marker below is a hole that must be
-> filled from an actual run or an actual walk. None of them may be filled by
-> guessing. If a number is not measured, the sentence comes out instead.
->
-> Required tags: `#devchallenge` `#hf26challenge`
-> Must use the official DEV submission template.
-
+---
+title: I built the thing that tells me to go outside, because I am the person who never does
+published: false
+tags: devchallenge, hf26challenge
 ---
 
-## Working titles
+> **Fill before publishing.** Every `TODO(real)` below is a hole that must be filled from an actual run or an actual walk, never by guessing. If a number is not measured, cut the sentence instead of inventing one. Checklist at the bottom. Publishing notes: set `published: true`, confirm the two tags survived, and delete this quote block.
 
-1. I built the thing that gets me outside, because I am the person who never goes
-2. Touch grass is advice. I made it a program that knows when I can actually take it
-3. My laptop is from 2017 and it tells me to go outside
+*This is a submission for the [Hacktoberfest Open-Source AI Challenge Week 1: Touch Grass](https://dev.to/devteam/join-the-hacktoberfest-open-source-ai-challenge-week-1-touch-grass-2450-in-prizes-across-17-4pom).*
 
-Pick one before publishing. Title 1 leads with the honesty, which is the strongest card.
-
----
-
-## Opening (the part that decides whether the rest gets read)
+## What I Built
 
 I do not go outside. Not as a lifestyle, as a failure.
 
 It is never a decision I make and lose. It is a decision I never reach. I am always mid-build, and the moment I think about stepping out, there is one more thing on screen that would be easier to finish first. Then it is dark.
 
-I have tried the obvious fixes. A timer goes off while I am halfway through a thought, so I dismiss it, and I am right to dismiss it. A calendar block for a walk is a block I schedule around. A habit app wants me to remember to open the habit app.
+I have tried the obvious fixes. A timer goes off while I am halfway through a thought, so I dismiss it, and I am right to dismiss it. A calendar block for a walk is a block I schedule around. A habit app wants me to remember to open the habit app. Every one of those fails for the same reason: **none of them know what I am doing when they interrupt me.** They interrupt at a *time*. The problem was never time. The problem is that I am mid-thing.
 
-Every one of those fails for the same reason: **none of them know what I am doing when they interrupt me.** They interrupt at a time. The problem is not time. The problem is that I am mid-thing.
-
-So I built the version that waits for the seam.
-
----
-
-## What it does
-
-`touchgrass` watches my own work for a pause where stepping away costs nothing. When it finds one, it says exactly one thing:
+So I built **touchgrass**, a terminal tool that waits for the *seam*: a moment my own work has already reached a stopping point. When it finds one, it says exactly one thing, then I leave.
 
 ```
-  You have 15 minutes. Walk to the bench by the water tower and come straight back.
+  ▌  You have 15 minutes. Walk to the bench by the water tower and come straight back.
+
+     15m window · 2h 28m daylight left · commit
 ```
 
-Then I leave. That is the entire interface. The screen is the shortest part, which is what this week's theme asked for.
+It finds the seam two ways, both derived from what I am actually doing, neither of them a clock:
 
-Two triggers, both derived from what I am actually doing, neither of them a clock:
+- **commit**: a new line appeared in `.git/logs/HEAD`. I just declared the work at a stopping point.
+- **activity-gap**: files were being edited, and then went quiet. I am stuck, thinking, or already drifting.
 
-- **commit**: a new line appeared in `.git/logs/HEAD`. The work is at a natural stopping point by definition, because I just declared it one.
-- **activity-gap**: files were being edited, and then went quiet. I am stuck, or thinking, or already drifting.
+A machine left simply running produces nothing at all, because an activity gap requires activity first. That is not a design intention, it is a test (`AC-6`). Before it ever speaks it checks, offline, whether there is enough daylight left for the walk it is about to suggest. If there is not, it stays quiet and tells me when the next window opens.
 
-A machine simply left running produces nothing at all. An activity gap requires activity first, because silence on its own is not a seam. That is not a design intention, it is a test:
+**Who it is for:** developers, writers, anyone who works in long unbroken sessions at a machine and keeps meaning to step outside. It runs where the work happens, because that is the only place the pause is detectable.
+
+## Demo
+
+TODO(real): a short screen recording (30 to 60 s) of `grass watch` reacting to a real `git commit`, then paste the asciinema or YouTube embed here. Suggested capture, with the model already warm:
+
+```bash
+grass sun      # the offline daylight screen
+grass try      # 3 suggestions now, with the AC-5/AC-11 numbers, nothing logged
+grass watch    # in another pane, make a commit and watch the suggestion appear
+grass log      # the evidence table afterwards
+```
+
+TODO(real): drop in the screenshots. The strongest set is the daylight screen (`grass sun`), the model actually writing (`grass try`, which shows three sentences and the pass/fail numbers beside them), and the evidence table (`grass log`). The hero suggestion from `grass watch` is the best shot of all if you catch one. They live in the repo once captured.
+
+It is a local offline CLI, so there is no hosted link to click. The repository below runs end to end on the hardware described.
+
+## Code
+
+{% embed TODO(real): https://github.com/<you>/touchgrass %}
+
+## How I Built It
+
+The open-source AI is **Gemma 3 1B (instruction tuned, Q4\_K\_M, about 769 MB)**, running locally through **llama.cpp**'s `llama-server`. No hosted API is involved at any point. The whole thing runs on a 2017 laptop:
 
 ```
-[NEEDS REAL DATA: paste the AC-6 result. 60 idle minutes, zero suggestions.]
-```
-
----
-
-## Why open weights are the whole project, not a box I ticked
-
-This is the part I would have gotten wrong if I had started from the technology instead of the problem.
-
-**It reads my git history and my file activity.** That is a record of what I work on and when I stop working on it. It is the last data I would post to someone else's inference endpoint. With an open-weight model running locally there is no endpoint to trust, no telemetry setting to audit, no key to leak. The privacy property is not a promise in a policy, it is the absence of a network call.
-
-**It runs on hardware nobody would choose for inference.** Here is the machine:
-
-```
-Intel Core i5-7300U (2017, 2 cores / 4 threads)
-No GPU
+Intel Core i5-7300U (2 cores / 4 threads), no GPU
 3.8 GB RAM total under WSL2, about 2.3 GB actually free
 ```
 
-Gemma 3 1B at Q4_K_M is 769 MB. A 2B model at the same quantisation does not safely share this machine with anything else, so the constraint chose the model, and then the design worked around the constraint instead of fighting it. The model is asked for one short sentence, at a moment when nothing is waiting on it. A few tokens per second stops mattering when the alternative to waiting is that I was going to sit there anyway.
+The design rule I held to: **the model does exactly one job, and it is the only job deterministic code cannot do.** Everything factual is plain code.
 
-```
-[NEEDS REAL DATA: measured wall time for one suggestion, and peak RSS.
- Target was under 20 s and under 1800 MB. Report what actually happened,
- including if it failed and we fell back to Gemma 3 270M.]
-```
+- **Daylight** is the NOAA solar position algorithm, computed from coordinates I enter at setup. No GPS, no IP lookup, no weather API, so it works with the network interface down. The tests assert physics (solstice day lengths, southern-hemisphere inversion, polar night and midnight sun at Tromso) rather than almanac values, so broken trig cannot quietly pass.
+- **Seam detection** is a 5-second poll of file mtimes and the size of `.git/logs/HEAD`.
+- **The model** turns those established facts into one sentence worth obeying. It is never allowed to invent a destination: the output must name a place I typed in myself, verbatim, and must be 20 words or fewer, and must not state a wrong number of minutes. If it fails that check twice, a deterministic sentence is used and the fallback is recorded.
 
-**The deterministic work stayed deterministic.** This is the line I would defend hardest. Seam detection, pause sizing and sunset are plain code. Sunset comes from the NOAA solar position algorithm computed locally, which is why the daylight logic keeps working with the interface down:
+Getting a 1B model to answer fast on this CPU was the real work, and the commit history shows the dead ends. First end-to-end test: 3 of 3 suggestions timed out, because prompt evaluation runs at 2.58 tok/s and the prompt was 160 tokens, which is 62 seconds of reading before a single word comes out. The fix was to cut the prompt to about 40 tokens, put the static instructions first so `llama-server` caches the prefix, prime that cache once at warm time, and keep it warm while watching. After that, suggestions landed in 3 to 10 seconds at about 930 MB peak memory.
 
-```
-[NEEDS REAL DATA: grass sun output, ideally with networking disabled.]
-```
+TODO(real): from your final `grass log`, state how often the model actually wrote the sentence versus fell back. A high fallback rate is a finding about 1B models on CPU, not something to hide. The footer of `grass log` prints this number for you.
 
-The model does one job: turn facts that code already established into a sentence worth obeying. If the model were doing the arithmetic, this would be a wrapper with a personality, and it would deserve to lose.
+The interface got designed like a product, because it is the entire product: one accent colour, hierarchy from weight and spacing rather than colour, a status word next to every colour so it survives a colourblind reader, and colour that switches itself off when output is piped to a file.
 
-**The model is not allowed to invent a destination.** Suggestions may only name places I typed in myself, checked character for character before anything prints. If it cannot produce a valid sentence in two attempts, a deterministic one is used and the fallback is recorded.
+## Why Does Open Innovation Matter?
 
-That last clause matters more than it looks. A tool that quietly falls back is a tool whose model was never load bearing. So here is the honest number:
+This is the part the tool could not do any other way.
 
-```
-[NEEDS REAL DATA: how many suggestions came from the model vs the fallback.
- If the fallback rate is high, say so and say why. A high rate is a finding
- about 1B models on CPU, not a thing to hide.]
-```
+**It reads my git history and my file-activity timestamps.** That is a record of what I work on and when I stop. It is the last data I would post to someone else's inference endpoint, and with an open-weight model running locally there is no endpoint to post it to. The privacy property is not a line in a policy I have to trust, it is the plain absence of a network call. I can run `grass watch` with the interface down and nothing about the tool degrades.
 
----
+**Open weights let the constraint pick the model.** A closed API assumes a datacentre. My machine is a 2017 ThinkPad with no GPU, and the entire design (tiny prompt, warm server, one short sentence, a deterministic fallback for when the small model stumbles) exists because I could hold the model in my hand, measure it, and build around exactly what it could and could not do. I could swap Gemma 3 1B for a 270M or a larger model by changing one path in a config file. A closed API is a fixed ceiling and a running meter; this is zero cost per run, forever, and fully inspectable.
 
-## The log, which is the only evidence that matters
+The honest version: a frontier closed model would write a nicer sentence. But the whole value here is that a record of my working habits never leaves my laptop, and that the tool keeps working on hardware and in places where there is no connection to leave it over. Open weights are not the compromise in this project. They are the point of it.
 
-I could have written all of the above and gone outside zero times.
+## My Agent Session
 
-An outing gets inferred from a gap in my file activity, then confirmed with one keypress when I get back. Suggestions I ignored are logged too, with `confirmed: false`, because a log that only records successes is not evidence of anything.
+TODO(real, optional): if you built any of this with an agent and want to show the process, save the session via DevRelay and embed it here with the `agent_session` tag, or delete this section.
 
-```
-[NEEDS REAL DATA: paste real grass log output. Minimum 3 confirmed outings.
- Include the ignored ones. Include the no_daylight rows.]
-```
+## Prize Categories
 
-```
-[NEEDS REAL DATA: at least one photograph taken on one of those walks.]
-```
-
-### What actually happened when I used it
-
-```
-[NEEDS REAL DATA: this is the section that wins or loses the post.
- What broke in real conditions? Did the suggestion arrive at a genuinely
- good moment or did it misjudge? Did you ignore one, and why? Was the
- estimate wrong? Did you come back and finish the thing you were doing,
- or did the walk cost you the thread after all?
-
- Write what happened, including the parts that make the tool look bad.
- A write-up that admits the second suggestion came at a terrible moment
- is worth more than one that claims three for three.]
-```
+**Gemma** (Featured): the load-bearing model is Gemma 3 1B, chosen because at Q4 it is one of the few genuinely capable instruction-tuned models that fits and runs on a no-GPU 2017 laptop with room to spare.
 
 ---
 
-## What I would not build
+### Checklist before publishing
 
-Scoped on day one and held to it:
-
-- No mobile app. The pause is only detectable on the machine where the work happens.
-- No accounts, no cloud, no sync. One local user, one config file, one log.
-- No streaks, points or badges. The moment this scores me, it becomes another screen.
-- No weather API. It needs the network, and it would sit directly beside a claim that nothing needs the network.
-- No UI beyond terminal text.
-
-The spec with the numbered acceptance criteria is in the repo, written before any code, including the ones I cut when the deadline compressed and the change log row that records the trade.
-
----
-
-## Try it
-
-```
-[NEEDS REAL DATA: repo URL]
-```
-
-Node 20+, no sudo, two downloads. Install steps are in the README.
-
----
-
-## Checklist before publishing
-
-- [ ] Every `[NEEDS REAL DATA]` marker replaced with a measured value or removed
-- [ ] Tags `#devchallenge` and `#hf26challenge` present
-- [ ] Official DEV submission template used
-- [ ] Repo link works and repo is public
-- [ ] LICENSE present
-- [ ] At least 3 confirmed outings in the pasted log
-- [ ] At least one outdoor photograph
+- [ ] Every `TODO(real)` replaced with a measured value, a real screenshot, or removed
+- [ ] `published: true` and both tags (`devchallenge`, `hf26challenge`) present
+- [ ] GitHub repo embed resolves and the repo is public
+- [ ] At least 3 confirmed outings in the pasted `grass log`, including any ignored and `no_daylight` rows
+- [ ] At least one photograph taken on one of those walks
+- [ ] The fallback rate stated honestly, whatever it is
 - [ ] Zero em dashes
-- [ ] The "what broke" section is honest enough to be uncomfortable
+- [ ] This instruction block and the leading quote deleted

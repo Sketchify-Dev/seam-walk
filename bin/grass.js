@@ -6,6 +6,7 @@
 //   grass sun      sunrise, sunset, daylight left, computed offline
 //   grass doctor   check weights, binary, and whether the model is warm
 //   grass warm     load the model now so the first suggestion is not slow
+//   grass try      run 3 suggestions now and show the AC-5/AC-11 numbers
 //   grass watch    watch for a seam and say one thing when it appears
 //   grass log      the evidence table
 //   grass went     answer a pending confirm
@@ -20,6 +21,7 @@ const logStore = require("../src/log.js");
 const config = require("../src/config.js");
 const model = require("../src/model.js");
 const watcher = require("../src/watch.js");
+const ui = require("../src/ui.js");
 
 const hhmm = (d) =>
   d
@@ -45,10 +47,16 @@ function loadConfigOrExit() {
  * server is what we actually want.
  */
 function findBin(cfg, name) {
+  const home = process.env.HOME || "";
   const candidates = [
     cfg[name === "llama-server" ? "serverBin" : "llamaBin"],
-    path.join(process.env.HOME || "", ".local", "llama", name),
-    path.join(process.env.HOME || "", ".local", "bin", name),
+    // The official llama.cpp release tarball extracts binaries under
+    // build/bin, so that is checked first, then the flatter layouts people
+    // make by hand.
+    path.join(home, ".local", "llama", "build", "bin", name),
+    path.join(home, ".local", "llama", "bin", name),
+    path.join(home, ".local", "llama", name),
+    path.join(home, ".local", "bin", name),
     `/usr/local/bin/${name}`,
     `/usr/bin/${name}`,
   ].filter(Boolean);
@@ -64,7 +72,28 @@ function findBin(cfg, name) {
 }
 
 function resolved(cfg) {
-  return { ...cfg, serverBin: findBin(cfg, "llama-server") };
+  return {
+    ...cfg,
+    serverBin: findBin(cfg, "llama-server"),
+    model: findModel(cfg),
+  };
+}
+
+/**
+ * Find the weights wherever they actually landed, so a setup made before the
+ * default path changed keeps working. Reports the configured path unchanged
+ * when nothing is found, so `grass doctor` can say exactly what is missing.
+ */
+function findModel(cfg) {
+  const candidates = [
+    cfg.model,
+    path.join(process.env.HOME || "", ".touchgrass", "models", "gemma3-1b-q4.gguf"),
+    "/tmp/g.gguf",
+  ].filter(Boolean);
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return cfg.model;
 }
 
 /**
@@ -79,17 +108,29 @@ async function askPending() {
     input: process.stdin,
     output: process.stdout,
   });
+  const q =
+    "\n" +
+    ui.INDENT +
+    ui.dim(`You were away ${ui.duration(pending.awayMin)} after:`) +
+    "\n" +
+    ui.INDENT +
+    ui.bold(pending.suggestion) +
+    "\n\n" +
+    ui.INDENT +
+    "Did you go out? " +
+    ui.dim("[y/n] ");
   const answer = await new Promise((resolve) => {
-    rl.question(
-      `\nYou were away ${pending.awayMin} minutes after: "${pending.suggestion}"\nDid you go out? [y/n] `,
-      (a) => resolve(a.trim().toLowerCase())
-    );
+    rl.question(q, (a) => resolve(a.trim().toLowerCase()));
   });
   rl.close();
 
   const went = answer.startsWith("y");
   logStore.update(pending.id, { confirmed: went });
-  console.log(went ? "Logged.\n" : "Logged as not taken.\n");
+  console.log(
+    ui.INDENT +
+      (went ? ui.green("Logged.") : ui.dim("Logged as not taken.")) +
+      "\n"
+  );
   return true;
 }
 
@@ -99,18 +140,42 @@ async function cmdSun() {
   const t = sun.sunTimes(cfg.lat, cfg.lon, now);
   const left = sun.daylightMinutesLeft(cfg.lat, cfg.lon, now);
 
-  console.log("");
-  console.log(`  coordinates   ${cfg.lat}, ${cfg.lon}`);
+  console.log(ui.heading("Daylight"));
+  console.log(ui.kv("location", `${cfg.lat}, ${cfg.lon}`));
+
   if (t.polar) {
-    console.log(`  condition     ${t.polar}`);
+    const midnightSun = t.polar === "midnight-sun";
+    console.log(
+      ui.kv(
+        "condition",
+        midnightSun ? "midnight sun" : "polar night",
+        midnightSun ? ui.green : ui.dim
+      )
+    );
   } else {
-    console.log(`  sunrise       ${hhmm(t.sunrise)}`);
-    console.log(`  solar noon    ${hhmm(t.solarNoon)}`);
-    console.log(`  sunset        ${hhmm(t.sunset)}`);
+    console.log(ui.kv("sunrise", hhmm(t.sunrise)));
+    console.log(ui.kv("solar noon", hhmm(t.solarNoon)));
+    console.log(ui.kv("sunset", hhmm(t.sunset)));
   }
-  console.log(`  daylight left ${left === Infinity ? "all night" : left + " min"}`);
+
+  // A shrinking fuel gauge of daylight: the green empties as the day ends, so
+  // "go now" reads off the shape before the figure beside it is read.
+  const total = t.sunrise && t.sunset ? (t.sunset - t.sunrise) / 60000 : null;
+  const frac = left === Infinity ? 1 : total ? left / total : 0;
   console.log("");
-  console.log("  Computed locally from coordinates. No network call was made.");
+  console.log(
+    ui.INDENT +
+      ui.dim("left".padEnd(ui.LABEL_W)) +
+      ui.bar(frac) +
+      "  " +
+      ui.bold(ui.duration(left))
+  );
+  console.log("");
+  console.log(
+    ui.note(
+      "Computed locally from your coordinates with the NOAA solar algorithm. No network call was made."
+    )
+  );
   console.log("");
 }
 
@@ -119,56 +184,101 @@ async function cmdDoctor() {
   const modelOk = fs.existsSync(cfg.model);
   const modelSize = modelOk ? Math.round(fs.statSync(cfg.model).size / 1048576) : 0;
   const warm = await model.health(cfg);
+  const coordsOk = cfg.lat != null && cfg.lon != null;
+  const placesOk = cfg.places.length >= 3;
+
+  console.log(ui.heading("Readiness"));
+  console.log(
+    ui.status(
+      "coordinates",
+      coordsOk ? `${cfg.lat}, ${cfg.lon}` : "not set, run: grass init",
+      coordsOk ? "ok" : "fail"
+    )
+  );
+  console.log(
+    ui.status(
+      "places",
+      placesOk ? `${cfg.places.length} set` : `${cfg.places.length} set, need 3, run: grass init`,
+      placesOk ? "ok" : "fail"
+    )
+  );
+  console.log(
+    ui.status(
+      "weights",
+      modelOk ? `${modelSize} MB` : `missing at ${cfg.model}`,
+      modelOk ? "ok" : "fail"
+    )
+  );
+  console.log(
+    ui.status(
+      "llama-server",
+      cfg.serverBin || "not found, see README install",
+      cfg.serverBin ? "ok" : "fail"
+    )
+  );
+  console.log(
+    ui.status(
+      "model",
+      warm ? `warm on port ${cfg.port || model.DEFAULT_PORT}` : "cold, run: grass warm",
+      warm ? "ok" : "warn"
+    )
+  );
 
   console.log("");
-  console.log(`  config       ${config.CONFIG_PATH}`);
-  console.log(`  coordinates  ${cfg.lat ?? "NOT SET"}, ${cfg.lon ?? "NOT SET"}`);
-  console.log(`  places       ${cfg.places.length}${cfg.places.length < 3 ? "  (need 3, run: grass init)" : ""}`);
-  console.log(`  weights      ${modelOk ? `${cfg.model} (${modelSize} MB)` : `MISSING at ${cfg.model}`}`);
-  console.log(`  llama-server ${cfg.serverBin || "NOT FOUND"}`);
-  console.log(`  model warm   ${warm ? `yes, on port ${cfg.port || model.DEFAULT_PORT}` : "no"}`);
-  console.log(`  log          ${logStore.LOG_PATH}`);
+  console.log(ui.kv("config", config.CONFIG_PATH));
+  console.log(ui.kv("log", logStore.LOG_PATH));
   console.log("");
 
   const problems = [];
   if (!modelOk) problems.push("weights missing");
   if (!cfg.serverBin) problems.push("llama-server not found");
-  if (cfg.lat == null || cfg.lon == null) problems.push("coordinates not set");
-  if (cfg.places.length < 3) problems.push("fewer than 3 places");
+  if (!coordsOk) problems.push("coordinates not set");
+  if (!placesOk) problems.push("fewer than 3 places");
 
   if (problems.length) {
-    console.log(`  Not ready: ${problems.join(", ")}.`);
+    console.log(ui.INDENT + ui.red("Not ready") + ui.dim(` · ${problems.join(", ")}`));
     console.log("");
     process.exit(1);
   }
-  console.log(warm ? "  Ready." : "  Ready. First load takes about 150 seconds, so run: grass warm");
+  console.log(
+    ui.INDENT +
+      ui.green("Ready") +
+      ui.dim(warm ? "" : " · first load takes about 150s, run: grass warm")
+  );
   console.log("");
 }
 
 async function warmUp(cfg) {
   const already = await model.health(cfg);
   if (!already) {
-    console.log("Loading the model. Cold load measured at ~148s on this hardware,");
-    console.log("~59s with a warm page cache. Paid once.");
+    console.log(
+      ui.note(
+        "Loading the model. Cold load measured at about 148s on this hardware, 59s with a warm page cache. Paid once."
+      )
+    );
   }
-  process.stdout.write("  ");
+  process.stdout.write(ui.INDENT);
 
   const r = await model.ensureServer(cfg, (secs, phase) => {
-    if (phase === "priming") process.stdout.write("priming prompt cache ");
-    else if (secs % 10 === 0) process.stdout.write(`${secs}s `);
+    if (phase === "priming") process.stdout.write(ui.dim("priming prompt cache "));
+    else if (secs % 10 === 0) process.stdout.write(ui.dim(`${secs}s `));
   });
 
   console.log("");
   if (!r.ok) {
-    console.log(`Failed: ${r.error}`);
+    console.log(ui.INDENT + ui.red("Failed") + ui.dim(` · ${r.error}`));
     return false;
   }
   if (r.primeMs != null) {
     console.log(
-      `Prompt cache primed in ${(r.primeMs / 1000).toFixed(0)}s${r.primed ? "" : " (prime failed, suggestions will be slow)"}.`
+      ui.dim(
+        `  Prompt cache primed in ${(r.primeMs / 1000).toFixed(0)}s${r.primed ? "" : " (prime failed, suggestions will be slow)"}.`
+      )
     );
   }
-  console.log("Warm. Suggestions now reuse the cached prefix.");
+  console.log(
+    ui.INDENT + ui.green("Warm.") + ui.dim(" Suggestions now reuse the cached prefix.")
+  );
   return true;
 }
 
@@ -231,10 +341,16 @@ async function cmdTry() {
     });
     recent.push(r.sentence);
     const words = r.sentence.split(/\s+/).filter(Boolean).length;
+    const tag = r.source === "model" ? ui.green(r.source) : ui.amber(r.source);
     console.log("");
-    console.log(`  [${i}] ${(r.ms / 1000).toFixed(1)}s   ${r.source}   ${words} words`);
-    console.log(`      ${r.sentence}`);
-    if (r.reason) console.log(`      reason: ${r.reason}`);
+    console.log(
+      ui.INDENT +
+        ui.dim(`[${i}] ${(r.ms / 1000).toFixed(1)}s · `) +
+        tag +
+        ui.dim(` · ${words} words`)
+    );
+    console.log(ui.INDENT + "    " + r.sentence);
+    if (r.reason) console.log(ui.INDENT + "    " + ui.dim(`reason: ${r.reason}`));
   }
 
   clearInterval(sampler);
@@ -244,11 +360,21 @@ async function cmdTry() {
   );
 
   console.log("");
-  console.log("  --- measured ---");
-  console.log(`  AC-5  word limit and place named : ${within ? "PASS" : "FAIL"}`);
-  console.log(`  AC-11 peak llama-server RSS      : ${peak} MB   (ceiling 1800 MB)  ${peak && peak < 1800 ? "PASS" : "CHECK"}`);
+  console.log(ui.INDENT + "  " + ui.dim("measured"));
+  console.log(
+    ui.INDENT +
+      ui.dim("AC-5".padEnd(ui.LABEL_W)) +
+      (within ? ui.green("pass") : ui.red("fail")) +
+      ui.dim("  word limit and place named")
+  );
+  console.log(
+    ui.INDENT +
+      ui.dim("AC-11".padEnd(ui.LABEL_W)) +
+      (peak && peak < 1800 ? ui.green("pass") : ui.amber("check")) +
+      ui.dim(`  peak llama-server RSS ${peak} MB, ceiling 1800 MB`)
+  );
   console.log("");
-  console.log("  Nothing was written to the log. This used a throwaway place.");
+  console.log(ui.note("Nothing was written to the log. This used a throwaway place."));
   console.log("");
 }
 
@@ -273,10 +399,15 @@ async function cmdWatch() {
   // would waste the very thing the tool exists to protect.
   if (!(await warmUp(cfg))) process.exit(1);
 
+  console.log(ui.heading("Watching"));
+  console.log(ui.kv("directories", cfg.watchDirs.join(", ")));
+  console.log(ui.kv("places", `${cfg.places.length} walkable`));
   console.log("");
-  console.log(`Watching ${cfg.watchDirs.join(", ")}`);
-  console.log("Nothing prints until your work reaches a pause.");
-  console.log("Ctrl-C to stop watching. The model stays warm.");
+  console.log(
+    ui.note(
+      "Nothing prints until your work reaches a pause. Leave this in a visible pane. Ctrl-C stops watching; the model stays warm."
+    )
+  );
   console.log("");
 
   // Hold the prompt cache open. A seam that arrives after a quiet stretch
@@ -297,9 +428,15 @@ async function cmdWatch() {
     // AC-7: not enough daylight means no suggestion at all, and no place name.
     if (daylightLeft < seam.estimateMin) {
       const w = sun.nextWindow(cfg.lat, cfg.lon, now);
+      console.log("");
       console.log(
-        `No daylight left. Next window opens ${hhmm(w.at)} ${w.sameDay ? "today" : "tomorrow"}.`
+        ui.INDENT +
+          ui.amber("No daylight left.") +
+          ui.dim(
+            ` Next window opens ${hhmm(w.at)} ${w.sameDay ? "today" : "tomorrow"}.`
+          )
       );
+      console.log("");
       logStore.append({
         trigger: seam.trigger,
         estimateMin: seam.estimateMin,
@@ -318,9 +455,10 @@ async function cmdWatch() {
       recent,
     });
 
-    console.log("");
-    console.log(`  ${result.sentence}`);
-    console.log("");
+    const meta = `${ui.duration(seam.estimateMin)} window · ${ui.duration(
+      daylightLeft
+    )} daylight left · ${seam.trigger}`;
+    console.log(ui.hero(result.sentence, meta));
 
     logStore.append({
       trigger: seam.trigger,
@@ -374,21 +512,32 @@ async function main() {
       console.log("");
       break;
     case "went":
-      if (!(await askPending())) console.log("Nothing waiting to be confirmed.");
+      if (!(await askPending())) {
+        console.log(ui.INDENT + ui.dim("Nothing waiting to be confirmed."));
+      }
       break;
-    default:
+    default: {
+      console.log(ui.heading("touchgrass"));
+      console.log(
+        ui.note("Get told to go outside at the one moment it costs you nothing.")
+      );
       console.log("");
-      console.log("  touchgrass");
+      const cmds = [
+        ["init", "set coordinates and walkable places"],
+        ["sun", "sunrise, sunset, daylight left, offline"],
+        ["doctor", "check weights, binary, warm state"],
+        ["warm", "load the model now (about 150s, once)"],
+        ["try", "run 3 suggestions now, see the model work"],
+        ["watch", "watch for a seam, then say one thing"],
+        ["log", "the evidence table"],
+        ["went", "answer a pending confirm"],
+        ["stop", "shut the model server down"],
+      ];
+      for (const [c, d] of cmds) {
+        console.log(ui.INDENT + ui.green("grass " + c.padEnd(8)) + ui.dim(d));
+      }
       console.log("");
-      console.log("    grass init     set coordinates and walkable places");
-      console.log("    grass sun      sunrise, sunset, daylight left, offline");
-      console.log("    grass doctor   check weights, binary, warm state");
-      console.log("    grass warm     load the model now (about 150 s, once)");
-      console.log("    grass watch    watch for a seam, then say one thing");
-      console.log("    grass log      the evidence table");
-      console.log("    grass went     answer a pending confirm");
-      console.log("    grass stop     shut the model server down");
-      console.log("");
+    }
   }
 }
 

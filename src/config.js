@@ -20,8 +20,9 @@ const DEFAULTS = {
   lon: null,
   places: [],
   // Path to the GGUF weights. Swappable by hand, which is the point of
-  // using open weights at all.
-  model: "/tmp/g.gguf",
+  // using open weights at all. `grass doctor` also looks in /tmp/g.gguf for
+  // setups made before this was the default.
+  model: path.join(HOME, "models", "gemma3-1b-q4.gguf"),
   // Resolved by `grass doctor` if left null. llama-cli is chat-only in
   // build 11514, so the server is what we drive.
   serverBin: null,

@@ -8,6 +8,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const ui = require("./ui.js");
 
 const HOME = path.join(os.homedir(), ".touchgrass");
 const LOG_PATH = path.join(HOME, "log.jsonl");
@@ -17,22 +18,40 @@ function ensureHome() {
 }
 
 /**
- * One row per seam that fired. Written the moment the suggestion is shown,
- * not when the user returns, so a suggestion that got ignored still leaves
- * a trace. Honest logs include the ignored ones.
+ * Build the row that gets written for one seam. Pure, so the exact shape can
+ * be tested without writing to the real evidence log on disk.
+ *
+ * `source` and `modelMs` are not decoration. The README claims the model is
+ * load bearing, and the only thing that can settle that is a count of how
+ * often it actually produced the sentence versus how often the deterministic
+ * fallback did. An earlier version built this row from a whitelist that
+ * silently dropped both fields, so every row written before 2026-10-11
+ * reports `source: null` and cannot be used as evidence either way. The
+ * regression test in test/run.js exists to stop that happening again.
  */
-function append(entry) {
-  ensureHome();
-  const row = {
+function buildRow(entry) {
+  return {
     id: entry.id || new Date().toISOString(),
     trigger: entry.trigger, // "commit" | "activity-gap"
     estimateMin: entry.estimateMin ?? null,
     suggestion: entry.suggestion ?? null,
     daylightLeftMin: entry.daylightLeftMin ?? null,
     outcome: entry.outcome, // "suggested" | "model_timeout" | "no_daylight" | "no_places"
+    source: entry.source ?? null, // "model" | "fallback"
+    modelMs: entry.modelMs ?? null,
     awayMin: entry.awayMin ?? null,
     confirmed: entry.confirmed ?? null, // null until the user answers
   };
+}
+
+/**
+ * One row per seam that fired. Written the moment the suggestion is shown,
+ * not when the user returns, so a suggestion that got ignored still leaves
+ * a trace. Honest logs include the ignored ones.
+ */
+function append(entry) {
+  ensureHome();
+  const row = buildRow(entry);
   fs.appendFileSync(LOG_PATH, JSON.stringify(row) + "\n", "utf8");
   return row;
 }
@@ -83,49 +102,109 @@ function confirmedOutings() {
 }
 
 const pad = (s, n) => String(s).padEnd(n);
-const hhmm = (iso) => {
+
+/** "10-09 16:12". The year goes in the header, not in every row. */
+const stamp = (iso) => {
   const d = new Date(iso);
   const p = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
+const clip = (s, n) =>
+  String(s).length <= n ? String(s) : String(s).slice(0, n - 1).trimEnd() + "…";
+
 /**
- * The table that goes in the DEV post as a screenshot, so it is formatted
- * for a human reading a terminal rather than for a parser.
+ * How often the model actually produced the sentence.
+ *
+ * This is the number that decides whether the open-weight model is load
+ * bearing or ornamental, so it is computed from the log rather than asserted
+ * in prose. Rows written before source tracking existed are counted
+ * separately instead of being quietly folded into either side.
+ */
+function modelRate(rows = readAll()) {
+  const suggested = rows.filter((r) => r.outcome === "suggested");
+  const model = suggested.filter((r) => r.source === "model").length;
+  const fallback = suggested.filter((r) => r.source === "fallback").length;
+  const untracked = suggested.filter((r) => r.source == null).length;
+  // `total` is the attributed denominator the write-up stands on: the
+  // suggestions whose source is known. Rows that predate source tracking
+  // cannot inform the model-versus-fallback ratio, so they are reported
+  // separately rather than folded into the total, where they would quietly
+  // drag the rate toward zero.
+  return { model, fallback, untracked, total: model + fallback };
+}
+
+/**
+ * The table that goes in the DEV post, so it is formatted for a human
+ * reading a terminal and kept under 80 columns to survive being pasted into
+ * a code block. The full untruncated text of every suggestion stays in the
+ * JSONL, which is the actual record.
  */
 function formatTable(rows = readAll()) {
   if (!rows.length) {
-    return "No entries yet. Start the watcher with: grass watch";
+    return ui.note("No entries yet. Start the watcher with: grass watch");
   }
 
-  const header =
-    pad("when", 18) +
-    pad("trigger", 14) +
-    pad("est", 6) +
-    pad("away", 7) +
-    pad("went", 6) +
+  const W = Math.max((process.stdout.columns || 80) - 2, 78);
+  const SUGG_W = W - 44;
+
+  const head =
+    pad("when", 13) +
+    pad("trigger", 8) +
+    pad("est/away", 9) +
+    pad("went", 5) +
+    pad("wrote", 9) +
     "suggestion";
-  const lines = [header, "-".repeat(Math.max(header.length, 60))];
+
+  const lines = [ui.INDENT + ui.dim(head), ui.INDENT + ui.dim("─".repeat(Math.min(W, head.length + SUGG_W)))];
 
   for (const r of rows) {
     const went =
       r.confirmed === true ? "yes" : r.confirmed === false ? "no" : "-";
-    lines.push(
-      pad(hhmm(r.id), 18) +
-        pad(r.trigger || "-", 14) +
-        pad(r.estimateMin != null ? `${r.estimateMin}m` : "-", 6) +
-        pad(r.awayMin != null ? `${r.awayMin}m` : "-", 7) +
-        pad(went, 6) +
-        (r.outcome === "suggested" ? r.suggestion || "" : `(${r.outcome})`)
-    );
+    const est = r.estimateMin != null ? `${r.estimateMin}m` : "-";
+    const away = r.awayMin != null ? `${r.awayMin}m` : "-";
+    const trigger = r.trigger === "activity-gap" ? "gap" : r.trigger || "-";
+    const wrote = r.outcome === "suggested" ? r.source || "untracked" : "-";
+    const text =
+      r.outcome === "suggested" ? clip(r.suggestion || "", SUGG_W) : `(${r.outcome})`;
+
+    // Confirmed outings are the evidence, so they are the only rows that get
+    // the accent. An unconfirmed row is not a failure, it is just not proof.
+    const row =
+      pad(stamp(r.id), 13) +
+      pad(trigger, 8) +
+      pad(`${est}/${away}`, 9) +
+      pad(went, 5) +
+      pad(wrote, 9) +
+      text;
+
+    lines.push(ui.INDENT + (r.confirmed === true ? ui.green(row) : row));
   }
 
   const confirmed = rows.filter((r) => r.confirmed === true);
   const totalMin = confirmed.reduce((a, r) => a + (r.awayMin || 0), 0);
+  const rate = modelRate(rows);
+
   lines.push("");
   lines.push(
-    `${confirmed.length} outing(s) confirmed, ${totalMin} minutes outside, ${rows.length} seam(s) detected.`
+    ui.INDENT +
+      ui.bold(
+        `${confirmed.length} outing${confirmed.length === 1 ? "" : "s"} confirmed`
+      ) +
+      ui.dim(
+        ` · ${ui.duration(totalMin)} outside · ${rows.length} seam${rows.length === 1 ? "" : "s"} detected`
+      )
   );
+
+  if (rate.total || rate.untracked) {
+    const parts = [];
+    if (rate.total) {
+      parts.push(`model wrote ${rate.model} of ${rate.total}`);
+      if (rate.fallback) parts.push(`${rate.fallback} fell back`);
+    }
+    if (rate.untracked) parts.push(`${rate.untracked} predate source tracking`);
+    lines.push(ui.INDENT + ui.dim(parts.join(", ")));
+  }
 
   return lines.join("\n");
 }
@@ -133,10 +212,12 @@ function formatTable(rows = readAll()) {
 module.exports = {
   HOME,
   LOG_PATH,
+  buildRow,
   append,
   readAll,
   update,
   pendingConfirm,
   confirmedOutings,
+  modelRate,
   formatTable,
 };

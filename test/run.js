@@ -17,6 +17,7 @@
 
 const sun = require("../src/sun.js");
 const model = require("../src/model.js");
+const logStore = require("../src/log.js");
 
 let failures = 0;
 let checks = 0;
@@ -219,6 +220,42 @@ ok(
     "number check is skipped when minutes is omitted",
     model.valid(`Walk to ${place}, five minutes away.`, place) === true
   );
+}
+
+console.log("\nlog.js\n");
+
+// Regression: the written row once dropped source and modelMs through a
+// whitelist, which silently destroyed the only evidence that the model was
+// load bearing rather than ornamental. buildRow is pure, so this asserts the
+// exact shape without writing to the real evidence log.
+{
+  const row = logStore.buildRow({
+    trigger: "commit",
+    outcome: "suggested",
+    suggestion: "Walk to the gate and back.",
+    source: "model",
+    modelMs: 4200,
+  });
+  ok("written row keeps source", row.source === "model", JSON.stringify(row));
+  ok("written row keeps modelMs", row.modelMs === 4200);
+  ok("written row defaults source to null when absent", logStore.buildRow({ outcome: "no_daylight" }).source === null);
+}
+
+// The model-vs-fallback rate is the number the write-up stands on, so it is
+// computed from the log, and it must split the three cases cleanly.
+{
+  const rows = [
+    { outcome: "suggested", source: "model" },
+    { outcome: "suggested", source: "model" },
+    { outcome: "suggested", source: "fallback" },
+    { outcome: "suggested", source: null }, // predates source tracking
+    { outcome: "no_daylight" }, // not a suggestion, must not be counted
+  ];
+  const r = logStore.modelRate(rows);
+  ok("modelRate counts model", r.model === 2, JSON.stringify(r));
+  ok("modelRate counts fallback", r.fallback === 1);
+  ok("modelRate counts untracked separately", r.untracked === 1);
+  ok("modelRate total excludes non-suggestions", r.total === 3);
 }
 
 console.log("");

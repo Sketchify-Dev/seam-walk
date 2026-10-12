@@ -1,10 +1,8 @@
 ---
 title: I built the thing that tells me to go outside, because I am the person who never does
-published: false
+published: true
 tags: devchallenge, hf26challenge
 ---
-
-> **Fill before publishing.** Every `TODO(real)` below is a hole that must be filled from an actual run or an actual walk, never by guessing. If a number is not measured, cut the sentence instead of inventing one. Checklist at the bottom. Publishing notes: set `published: true`, confirm the two tags survived, and delete this quote block.
 
 *This is a submission for the [Hacktoberfest Open-Source AI Challenge Week 1: Touch Grass](https://dev.to/devteam/join-the-hacktoberfest-open-source-ai-challenge-week-1-touch-grass-2450-in-prizes-across-17-4pom).*
 
@@ -35,7 +33,9 @@ A machine left simply running produces nothing at all, because an activity gap r
 
 ## Demo
 
-TODO(real): a short screen recording (30 to 60 s) of `grass watch` reacting to a real `git commit`, then paste the asciinema or YouTube embed here. Suggested capture, with the model already warm:
+There is no screen recording with this post. The deadline fell at night in my timezone and `watch` correctly stays quiet after dark, so a recording would have shown nothing happening, which is the tool working, not a demo. What follows is stronger anyway: four screenshots from tonight, captured with the model already warm, plus the full `try` output pasted verbatim.
+
+Suggested capture, for anyone reproducing this:
 
 ```bash
 grass sun      # the offline daylight screen
@@ -44,7 +44,29 @@ grass watch    # in another pane, make a commit and watch the suggestion appear
 grass log      # the evidence table afterwards
 ```
 
-TODO(real): drop in the screenshots. The strongest set is the daylight screen (`grass sun`), the model actually writing (`grass try`, which shows three sentences and the pass/fail numbers beside them), and the evidence table (`grass log`). The hero suggestion from `grass watch` is the best shot of all if you catch one. They live in the repo once captured.
+The screenshots, in order: `grass try` (the lead, three sentences with the pass/fail numbers beside them), `grass doctor` (every row `ok`), `grass sun` (the offline daylight screen showing the 0m night gate), and `grass log` (the evidence table with 1 confirmed outing).
+
+Tonight's real `grass try` output, pasted verbatim:
+
+```
+[1] 127.0s · fallback · 16 words
+    You have 15 minutes. Walk to the bench by the water tower and come straight back.
+    reason: timeout
+
+[2] 97.4s · fallback · 16 words
+    You have 15 minutes. Walk to the bench by the water tower and come straight back.
+    reason: timeout
+
+[3] 101.0s · fallback · 16 words
+    You have 15 minutes. Walk to the bench by the water tower and come straight back.
+    reason: timeout
+
+  measured
+AC-5          pass  word limit and place named
+AC-11         pass  peak llama-server RSS 933 MB, ceiling 1800 MB
+
+Nothing was written to the log. This used a throwaway place.
+```
 
 It is a local offline CLI, so there is no hosted link to click. The repository below runs end to end on the hardware described.
 
@@ -67,9 +89,9 @@ The design rule I held to: **the model does exactly one job, and it is the only 
 - **Seam detection** is a 5-second poll of file mtimes and the size of `.git/logs/HEAD`.
 - **The model** turns those established facts into one sentence worth obeying. It is never allowed to invent a destination: the output must name a place I typed in myself, verbatim, and must be 20 words or fewer, and must not state a wrong number of minutes. If it fails that check twice, a deterministic sentence is used and the fallback is recorded.
 
-Getting a 1B model to answer fast on this CPU was the real work, and the commit history shows the dead ends. First end-to-end test: 3 of 3 suggestions timed out, because prompt evaluation runs at 2.58 tok/s and the prompt was 160 tokens, which is 62 seconds of reading before a single word comes out. The fix was to cut the prompt to about 40 tokens, put the static instructions first so `llama-server` caches the prefix, prime that cache once at warm time, and keep it warm while watching. After that, suggestions landed in 3 to 10 seconds at about 930 MB peak memory. Rerun on 2026-10-12 after re-downloading the weights: prompt cache primed in 13s, then `grass try` produced 1 model sentence in 16.6s followed by 2 fallback timeouts at 37.4s and 92.8s, peak llama-server RSS 941 MB, with AC-5 and AC-11 both passing. Slower than the earlier 3 to 10s window, which is reported as measured, not hidden.
+Getting a 1B model to answer fast on this CPU was the real work, and the commit history shows the dead ends. First end-to-end test: 3 of 3 suggestions timed out, because prompt evaluation runs at 2.58 tok/s and the prompt was 160 tokens, which is 62 seconds of reading before a single word comes out. The fix was to cut the prompt to about 40 tokens, put the static instructions first so `llama-server` caches the prefix, prime that cache once at warm time, and keep it warm while watching. After that, suggestions landed in 3 to 10 seconds at about 930 MB peak memory. Rerun on 2026-10-12 after re-downloading the weights: prompt cache primed in 13s, then `grass try` produced 1 model sentence in 16.6s followed by 2 fallback timeouts at 37.4s and 92.8s, peak llama-server RSS 941 MB, with AC-5 and AC-11 both passing. Slower than the earlier 3 to 10s window, which is reported as measured, not hidden. A second run tonight gave 0 model sentences with 3 fallback timeouts at 127.0s, 97.4s and 101.0s, peak llama-server RSS 933 MB, with AC-5 and AC-11 both passing.
 
-TODO(real): from your final `grass log`, state how often the model actually wrote the sentence versus fell back. A high fallback rate is a finding about 1B models on CPU, not something to hide. The footer of `grass log` prints this number for you.
+From the final `grass log`, the model versus fallback rate is not computable from the table itself, because both rows predate source tracking and read `untracked` in the `wrote` column. The measured signal is `grass try`: on 2026-10-12 one rerun gave 1 model sentence in 16.6s plus 2 fallback timeouts at 37.4s and 92.8s, and tonight gave 0 model sentences with 3 fallback timeouts at 127.0s, 97.4s and 101.0s. AC-5 and AC-11 pass on both runs. The honest finding is that Gemma 3 1B on this 2017 CPU is marginal under these conditions, and the deterministic fallback carries the tool when the model stalls. A high fallback rate is a finding about 1B models on CPU, not something to hide.
 
 The interface got designed like a product, because it is the entire product: one accent colour, hierarchy from weight and spacing rather than colour, a status word next to every colour so it survives a colourblind reader, and colour that switches itself off when output is piped to a file.
 
@@ -79,7 +101,7 @@ I want to be exact about which claims here rest on code I ran and which rest on 
 
 **Tested by running it.** `npm test` passes 40 of 40 checks: the NOAA solar maths (asserted against physics, not an almanac), the 20-word and verbatim-place rules every model sentence has to clear, and the evidence-log accounting that keeps a model-written suggestion separate from a deterministic fallback. The figures in the performance table were measured on the 2017 laptop named above, not estimated. The offline property is structural, not a setting: there is no network call anywhere in the code to switch off.
 
-**Walked.** TODO(real): state how many confirmed outings are in your `grass log` and whether you photographed one. Write the real number. If it is fewer than three, say that plainly here and let the engineering and the honest fallback rate carry the post. A tool that reports its own fallback rate cannot start padding its outing count.
+**Walked.** `grass log` shows 1 confirmed outing from 2 detected seams. The confirmed row is the 10-11 02:57 activity gap, away 686m, which spans overnight and so overstates literal time outside. I confirmed it because I did go out after that suggestion, to the street end and back, but I am not claiming an 11 hour walk. Both rows predate source tracking, so they read `untracked` in the `wrote` column. A night photo taken on my phone accompanies this post, labeled as a night walk outside the tool flow. One honest outing plus an honest fallback rate is what I have, and a tool that reports its own fallback rate cannot start padding its outing count.
 
 ## Why Does Open Innovation Matter?
 
@@ -94,16 +116,3 @@ The honest version: a frontier closed model would write a nicer sentence. But th
 ## Prize Categories
 
 **Gemma** (Featured): the load-bearing model is Gemma 3 1B, chosen because at Q4 it is one of the few genuinely capable instruction-tuned models that fits and runs on a no-GPU 2017 laptop with room to spare.
-
----
-
-### Checklist before publishing
-
-- [ ] Every `TODO(real)` replaced with a measured value, a real screenshot, or removed
-- [ ] `published: true` and both tags (`devchallenge`, `hf26challenge`) present
-- [ ] GitHub repo embed resolves and the repo is public
-- [ ] The outing count in `grass log` is stated truthfully (three is the goal; if fewer, say so plainly and never pad the log)
-- [ ] At least one photograph taken on one of those walks
-- [ ] The fallback rate stated honestly, whatever it is
-- [ ] Zero em dashes
-- [ ] This instruction block and the leading quote deleted
